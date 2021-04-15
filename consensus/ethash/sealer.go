@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	crand "crypto/rand"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"math"
@@ -224,7 +223,7 @@ type mineResult struct {
 	nonce     types.BlockNonce
 	mixDigest common.Hash
 	hash      common.Hash
-	extraNonce *uint32
+	extraNonce []byte
 
 	errc chan error
 }
@@ -234,7 +233,6 @@ type hashrate struct {
 	id   common.Hash
 	ping time.Time
 	rate uint64
-	extraNonce *uint32
 
 	done chan struct{}
 }
@@ -365,7 +363,7 @@ func (s *remoteSealer) makeWork(block *types.Block) {
 	s.currentWork[7] = hexutil.EncodeUint64(uint64(len(block.Transactions())))
 	s.currentWork[8] = hexutil.EncodeUint64(uint64(len(block.Uncles())))
 
-	header.Extra = append(header.Extra, make([]byte, 4)...)
+	extra := append(header.Extra, make([]byte, 4)...)
 	encoded, err := rlp.EncodeToBytes([]interface{}{
 		header.ParentHash,
 		header.UncleHash,
@@ -379,7 +377,7 @@ func (s *remoteSealer) makeWork(block *types.Block) {
 		header.GasLimit,
 		header.GasUsed,
 		header.Time,
-		header.Extra,
+		extra,
 	})
 	if err == nil {
 		s.currentWork[9] = hexutil.Encode(encoded)
@@ -435,7 +433,7 @@ func (s *remoteSealer) sendNotification(ctx context.Context, url string, json []
 // submitWork verifies the submitted pow solution, returning
 // whether the solution was accepted or not (not can be both a bad pow as well as
 // any other error, like no pending work or stale mining result).
-func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest common.Hash, sealhash common.Hash, extraNonce *uint32) bool {
+func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest common.Hash, sealhash common.Hash, extraNonce []byte) bool {
 	if s.currentBlock == nil {
 		s.ethash.config.Log.Error("Pending work without block", "sealhash", sealhash)
 		return false
@@ -450,11 +448,7 @@ func (s *remoteSealer) submitWork(nonce types.BlockNonce, mixDigest common.Hash,
 	header := block.Header()
 	header.Nonce = nonce
 	header.MixDigest = mixDigest
-	if extraNonce != nil {
-		buf := make([]byte, 4)
-		binary.BigEndian.PutUint32(buf, *extraNonce)
-		header.Extra = append(header.Extra, buf...)
-	}
+	header.Extra = append(header.Extra, extraNonce...)
 
 	start := time.Now()
 	if !s.noverify {
